@@ -48,6 +48,7 @@ static void PrintUsage() {
 	::printf("Options can also be set in kyty_settings.ini in the working directory, one per\n"
 	         "line without \"--\" (e.g. gpu-timestamp-scale = 115). The command line overrides it.\n\n");
 	::printf("Options:\n");
+	::printf("  --preset <Quality|Balanced|Performance>  Graphics and FPS preset profile.\n");
 	::printf("  --game <dir|elf|zar>                 Game directory, ELF, or ZArchive to load.\n");
 	::printf("  --game-patch <json>                  ETAHen cheat file.\n");
 	::printf("  --screen-width <num>                 Window width. Default: 1280.\n");
@@ -118,6 +119,8 @@ static void PrintUsage() {
 #endif
 	::printf("  --keymap <Control=Input>             DualSense mapping; may be repeated.\n");
 	::printf("  --rd                                 Enable RenderDoc capture.\n");
+	::printf("  --ray-tracing <true|false>           Enable hardware ray tracing. Default: false.\n");
+	::printf("  --auto-optimize                      Auto-detect and optimize for host PC specs.\n");
 }
 
 static bool NextArg(int argc, char* argv[], int& index, std::string& out) {
@@ -199,6 +202,24 @@ static bool ParseUserId(const std::string& value, int32_t& out) {
 	return true;
 }
 
+static bool CheckOptionalBool(int& i, int argc, char* argv[], bool& out) {
+	if (i + 1 < argc) {
+		std::string_view next = argv[i + 1];
+		if (next == "true" || next == "1") {
+			out = true;
+			i++;
+			return true;
+		}
+		if (next == "false" || next == "0") {
+			out = false;
+			i++;
+			return true;
+		}
+	}
+	out = true;
+	return false;
+}
+
 static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_help) {
 	show_help = false;
 
@@ -212,55 +233,95 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 		}
 
 		if (arg == "--rd") {
-			options.config.renderdoc_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.renderdoc_enabled);
 			continue;
 		}
 
 		if (arg == "--fullscreen") {
-			options.config.fullscreen_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.fullscreen_enabled);
 			continue;
 		}
 
 		if (arg == "--vr") {
-			options.config.vr_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.vr_enabled);
 			continue;
 		}
 
 		if (arg == "--amd-cpu") {
-			options.config.amd_cpu_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.amd_cpu_enabled);
 			continue;
 		}
 
 		if (arg == "--playgo-hack") {
-			options.config.playgo_hack_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.playgo_hack_enabled);
 			continue;
 		}
 
 		if (arg == "--tessellation") {
-			options.config.tessellation_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.tessellation_enabled);
 			continue;
 		}
 
 		if (arg == "--profile") {
-			options.config.profiler_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.profiler_enabled);
 			continue;
 		}
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 		if (arg == "--redzone") {
-			options.config.red_zone_protection_enabled = true;
+			CheckOptionalBool(i, argc, argv, options.config.red_zone_protection_enabled);
 			continue;
 		}
 #endif
 
-		if (!arg.starts_with("--")) {
-			::printf("game input must be provided with --game\n");
-			return false;
+		if (arg == "--audio-mute") {
+			CheckOptionalBool(i, argc, argv, options.config.audio_muted);
+			continue;
 		}
 
-		if (!NextArg(argc, argv, i, value)) {
-			::printf("missing value for %s\n", arg.c_str());
-			return false;
+		if (arg == "--motion-blur") {
+			CheckOptionalBool(i, argc, argv, options.config.motion_blur_enabled);
+			continue;
+		}
+
+		if (arg == "--depth-of-field") {
+			CheckOptionalBool(i, argc, argv, options.config.depth_of_field_enabled);
+			continue;
+		}
+
+		if (arg == "--bloom") {
+			CheckOptionalBool(i, argc, argv, options.config.bloom_enabled);
+			continue;
+		}
+
+		if (arg == "--ambient-occlusion") {
+			CheckOptionalBool(i, argc, argv, options.config.ambient_occlusion_enabled);
+			continue;
+		}
+
+		if (arg == "--ray-tracing") {
+			CheckOptionalBool(i, argc, argv, options.config.ray_tracing_enabled);
+			continue;
+		}
+
+		if (arg == "--auto-optimize") {
+			CheckOptionalBool(i, argc, argv, options.config.auto_spec_optimization);
+			continue;
+		}
+
+		if (!arg.starts_with("--")) {
+			if (options.app0_dir.empty()) {
+				arg = "--game";
+				value = std::string(argv[i]);
+			} else {
+				::printf("game input must be provided with --game\n");
+				return false;
+			}
+		} else {
+			if (!NextArg(argc, argv, i, value)) {
+				::printf("missing value for %s\n", arg.c_str());
+				return false;
+			}
 		}
 
 		if (arg == "--game") {
@@ -353,6 +414,77 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 		} else if (arg == "--vblank-frequency") {
 			if (!ParseUint32(value, options.config.vblank_frequency)) {
 				::printf("invalid vblank frequency: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--osd-mode") {
+			if (!ParseInt32(value, options.config.osd_mode) || options.config.osd_mode < 0 || options.config.osd_mode > 2) {
+				::printf("invalid osd mode: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--osd-alignment") {
+			if (!ParseInt32(value, options.config.osd_alignment) || options.config.osd_alignment < 0 || options.config.osd_alignment > 3) {
+				::printf("invalid osd alignment: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--master-volume") {
+			if (!ParseUint32(value, options.config.master_volume) || options.config.master_volume > 100) {
+				::printf("invalid master volume (0-100): %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--aniso") {
+			if (!ParseInt32(value, options.config.anisotropic_filtering)) {
+				::printf("invalid anisotropic filtering: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--res-scale") {
+			if (!ParseUint32(value, options.config.resolution_scale_percent) || options.config.resolution_scale_percent == 0) {
+				::printf("invalid resolution scale: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--preset") {
+			std::string p = value;
+			std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+			if (p == "auto") {
+				options.config.auto_spec_optimization = true;
+				::printf("Profile preset applied: Auto (Dynamic hardware detection & optimization enabled)\n");
+			} else if (p == "quality") {
+				options.config.gpu_timestamp_scale_percent = 100;
+				options.config.async_submit_enabled        = true;
+				options.config.pipeline_libraries_enabled  = true;
+				options.config.async_pipelines_enabled     = false;
+				options.config.relaxed_readback_enabled    = false;
+				options.config.dcc_gpu_clear_enabled       = true;
+				options.config.gpu_mesh_indirect_enabled   = true;
+				options.config.amd_cpu_enabled             = true;
+				options.config.hardware_buffer_bounds      = true;
+				::printf("Profile preset applied: Quality (Native resolution, strict buffers, high precision)\n");
+			} else if (p == "balanced") {
+				options.config.gpu_timestamp_scale_percent = 115;
+				options.config.async_submit_enabled        = true;
+				options.config.pipeline_libraries_enabled  = true;
+				options.config.async_pipelines_enabled     = true;
+				options.config.relaxed_readback_enabled    = true;
+				options.config.dcc_gpu_clear_enabled       = true;
+				options.config.gpu_mesh_indirect_enabled   = true;
+				options.config.amd_cpu_enabled             = true;
+				options.config.record_thread_enabled       = true;
+				options.config.hardware_buffer_bounds      = true;
+				::printf("Profile preset applied: Balanced (115%% Dynamic scale headroom, 60 FPS target, optimized for Ryzen & Modern GPUs)\n");
+			} else if (p == "performance") {
+				options.config.gpu_timestamp_scale_percent = 130;
+				options.config.async_submit_enabled        = true;
+				options.config.pipeline_libraries_enabled  = true;
+				options.config.async_pipelines_enabled     = true;
+				options.config.relaxed_readback_enabled    = true;
+				options.config.speculative_draws_enabled   = true;
+				options.config.dcc_gpu_clear_enabled       = true;
+				options.config.gpu_mesh_indirect_enabled   = true;
+				options.config.amd_cpu_enabled             = true;
+				options.config.record_thread_enabled       = true;
+				options.config.hardware_buffer_bounds      = true;
+				::printf("Profile preset applied: Performance (130%% Dynamic scale headroom, maximum FPS)\n");
+			} else {
+				::printf("unknown preset: %s (choose Quality, Balanced, or Performance)\n", value.c_str());
 				return false;
 			}
 		} else if (arg == "--console-language") {

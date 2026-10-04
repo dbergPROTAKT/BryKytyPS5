@@ -1,0 +1,54 @@
+name: Build Linux (Podman dev container)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: localhost/kytyps5-dev:ci
+
+jobs:
+  linux-container:
+    name: Build KytyPS5 (Linux, Podman)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build dev container image
+        run: |
+          podman --version
+          podman build -t "$IMAGE" -f .devcontainer/Containerfile .devcontainer
+
+      - name: Configure, build and install
+        run: |
+          podman run --rm \
+            --userns=keep-id \
+            --security-opt=label=disable \
+            -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE":/workspace \
+            -w /workspace \
+            "$IMAGE" \
+            bash -euo pipefail -c '
+              cmake -S . -B _Build/linux -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_C_COMPILER=clang \
+                -DCMAKE_CXX_COMPILER=clang++
+              cmake --build _Build/linux --target launcher --parallel
+              cmake --install _Build/linux --prefix _Build/linux/install
+              file _Build/linux/install/kyty_emulator | grep -q "ELF 64-bit LSB .*x86-64"
+              _Build/linux/install/kyty_emulator --help > /dev/null
+            '
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KytyPS5-Linux-x86_64-podman
+          path: _Build/linux/install/**
+          if-no-files-found: error

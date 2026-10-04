@@ -553,11 +553,15 @@ struct PipelineCache::ProgramCache {
 	// Null when the job was dropped (the worker threads stopped) or failed.
 	template <typename T>
 	[[nodiscard]] static std::optional<T> TakeResult(std::future<T>& future) {
+#if defined(__cpp_exceptions)
 		try {
 			return future.get();
 		} catch (const std::exception&) {
 			return std::nullopt;
 		}
+#else
+		return future.get();
+#endif
 	}
 
 	// Whether the shader stores to buffers, writes images or uses GDS, found by decoding only.

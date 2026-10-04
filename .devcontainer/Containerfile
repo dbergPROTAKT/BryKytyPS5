@@ -1,0 +1,48 @@
+FROM docker.io/library/ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install --no-install-recommends --yes \
+        build-essential \
+        ca-certificates \
+        clang \
+        cmake \
+        file \
+        gdb \
+        git \
+        glslang-tools \
+        libasound2-dev \
+        libdbus-1-dev \
+        libdecor-0-dev \
+        libgl1-mesa-dev \
+        libpulse-dev \
+        libudev-dev \
+        libvulkan-dev \
+        libwayland-dev \
+        libx11-dev \
+        libxcursor-dev \
+        libxext-dev \
+        libxfixes-dev \
+        libxi-dev \
+        libxkbcommon-dev \
+        libxrandr-dev \
+        libxss-dev \
+        libxtst-dev \
+        lld \
+        mesa-vulkan-drivers \
+        ninja-build \
+        pkg-config \
+        qt6-base-dev \
+        qt6-base-dev-tools \
+        sudo \
+        vulkan-tools \
+        wayland-protocols \
+    && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu 24.04 ships a default "ubuntu" user (UID 1000); give it passwordless sudo.
+RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu && chmod 0440 /etc/sudoers.d/ubuntu
+
+ENV CC=clang CXX=clang++
+
+USER ubuntu
+WORKDIR /workspace

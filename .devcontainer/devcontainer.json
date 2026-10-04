@@ -1,0 +1,43 @@
+{
+    "name": "KytyPS5 Linux",
+    "build": {
+        "dockerfile": "Containerfile",
+        "context": "."
+    },
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,Z",
+    "workspaceFolder": "/workspace",
+    "remoteUser": "ubuntu",
+    "containerUser": "ubuntu",
+    "updateRemoteUserUID": true,
+    "runArgs": [
+        "--userns=keep-id",
+        "--security-opt=label=disable",
+        "--device=/dev/dri"
+    ],
+    "postCreateCommand": "git config --global --add safe.directory /workspace && git submodule update --init --recursive",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cmake-tools",
+                "ms-vscode.cpptools",
+                "llvm-vs-code-extensions.vscode-clangd"
+            ],
+            "settings": {
+                "cmake.buildDirectory": "${workspaceFolder}/_Build/linux",
+                "cmake.generator": "Ninja",
+                "cmake.useVsDeveloperEnvironment": "never",
+                "cmake.environment": {
+                    "CC": "clang",
+                    "CXX": "clang++"
+                },
+                "cmake.configureSettings": {
+                    "CMAKE_C_COMPILER": "clang",
+                    "CMAKE_CXX_COMPILER": "clang++",
+                    "CMAKE_BUILD_TYPE": "Release"
+                },
+                "C_Cpp.default.intelliSenseMode": "linux-clang-x64",
+                "C_Cpp.default.compileCommands": "${workspaceFolder}/_Build/linux/compile_commands.json"
+            }
+        }
+    }
+}

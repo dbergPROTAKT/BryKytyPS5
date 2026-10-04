@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <memory>
+#include <optional>
 #include <thread>
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 #ifndef WIN32_LEAN_AND_MEAN
@@ -466,15 +468,25 @@ void ReloadFromSettingsFile() {
 		std::string lower_val = val;
 		std::transform(lower_val.begin(), lower_val.end(), lower_val.begin(), ::tolower);
 		bool bool_val = (lower_val == "true" || lower_val == "1" || lower_val == "yes" || lower_val == "on");
+		std::optional<int> int_val;
+		if (int parsed {}; std::from_chars(val.data(), val.data() + val.size(), parsed).ec == std::errc {}) {
+			int_val = parsed;
+		}
 
 		if (arg == "--master-volume") {
-			try { SetMasterVolume(static_cast<uint32_t>(std::stoi(val))); } catch (...) {}
+			if (int_val) {
+				SetMasterVolume(static_cast<uint32_t>(*int_val));
+			}
 		} else if (arg == "--audio-mute") {
 			SetAudioMuted(bool_val);
 		} else if (arg == "--aniso") {
-			try { SetAnisotropicFiltering(std::stoi(val)); } catch (...) {}
+			if (int_val) {
+				SetAnisotropicFiltering(*int_val);
+			}
 		} else if (arg == "--res-scale") {
-			try { SetResolutionScalePercent(static_cast<uint32_t>(std::stoi(val))); } catch (...) {}
+			if (int_val) {
+				SetResolutionScalePercent(static_cast<uint32_t>(*int_val));
+			}
 		} else if (arg == "--ray-tracing") {
 			SetRayTracingEnabled(bool_val);
 		} else if (arg == "--motion-blur") {
@@ -486,7 +498,9 @@ void ReloadFromSettingsFile() {
 		} else if (arg == "--ambient-occlusion") {
 			SetAmbientOcclusionEnabled(bool_val);
 		} else if (arg == "--gpu-timestamp-scale") {
-			try { SetGpuTimestampScalePercent(static_cast<uint32_t>(std::stoi(val))); } catch (...) {}
+			if (int_val) {
+				SetGpuTimestampScalePercent(static_cast<uint32_t>(*int_val));
+			}
 		} else if (arg == "--pipeline-libraries") {
 			SetPipelineLibrariesEnabled(bool_val);
 		} else if (arg == "--async-pipelines") {

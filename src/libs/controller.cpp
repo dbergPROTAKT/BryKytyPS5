@@ -117,6 +117,7 @@ public:
 	int  GetActiveControllerId();
 	void SetLightBar(uint8_t r, uint8_t g, uint8_t b);
 	bool SetTriggerEffect(const PadTriggerEffectParam& param);
+	void GetTriggerEffectState(int32_t* state);
 	void ReadState(ControllerState* state, bool* flag, int* count);
 	int  ReadStates(ControllerState* states, int states_num, bool* flag, int* count);
 
@@ -139,9 +140,18 @@ private:
 	uint32_t         m_states_num    = 0;
 	uint32_t         m_first_state   = 0;
 	uint8_t          m_next_touch_id = 1;
+	// Every effect the game set, for scePadGetTriggerEffectState.
+	PadTriggerEffectParam m_state_effect {};
 };
 
 static GameController* g_controller = nullptr;
+
+// A trigger's travel, 0..255. An L2/R2 that arrives as a button only counts as full travel.
+static int TriggerTravel(const ControllerState& state, Axis axis) {
+	const auto button = axis == Axis::TriggerLeft ? PAD_BUTTON_L2 : PAD_BUTTON_R2;
+	const int  value  = state.axes[static_cast<int>(axis)];
+	return (state.buttons & button) != 0 && value == 0 ? 255 : value;
+}
 
 static void pad_fill_data(PadData* data, const ControllerState& state, bool connected,
                           int connected_count) {
@@ -154,8 +164,8 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 	data->left_stick_y      = state.axes[static_cast<int>(Axis::LeftY)];
 	data->right_stick_x     = state.axes[static_cast<int>(Axis::RightX)];
 	data->right_stick_y     = state.axes[static_cast<int>(Axis::RightY)];
-	data->analog_buttons_l2 = state.axes[static_cast<int>(Axis::TriggerLeft)];
-	data->analog_buttons_r2 = state.axes[static_cast<int>(Axis::TriggerRight)];
+	data->analog_buttons_l2 = static_cast<uint8_t>(TriggerTravel(state, Axis::TriggerLeft));
+	data->analog_buttons_r2 = static_cast<uint8_t>(TriggerTravel(state, Axis::TriggerRight));
 	data->acceleration_x     = state.accel[0];
 	data->acceleration_y     = state.accel[1];
 	data->acceleration_z     = state.accel[2];
@@ -266,6 +276,63 @@ static bool trigger_effect_to_dualsense(const PadTriggerEffectCommand& command, 
 	}
 }
 
+// scePadGetTriggerEffectState values (libScePad).
+enum TriggerState : int32_t {
+	TRIGGER_STATE_FEEDBACK_NO_FORCE     = 1,
+	TRIGGER_STATE_FEEDBACK_IS_PUSHING   = 2,
+	TRIGGER_STATE_WEAPON_NOT_PRESSED    = 3,
+	TRIGGER_STATE_WEAPON_ALMOST_PRESSED = 4,
+	TRIGGER_STATE_WEAPON_FULLY_PRESSED  = 5,
+	TRIGGER_STATE_VIBRATION_NOT_FIRING  = 6,
+	TRIGGER_STATE_VIBRATION_IS_FIRING   = 7,
+};
+
+// SDL does not expose the DualSense's own effect report, so the state follows from the game's
+// effect and the trigger's travel (0..255 over the effect's ten positions). Games wait for it.
+constexpr int TRIGGER_PRESSED_MIN = 8; // below this the trigger counts as released (rest noise)
+
+int32_t TriggerEffectState(const PadTriggerEffectCommand& command, int value) {
+	const int  pos     = std::clamp(value, 0, 255) * 10 / 256;
+	const bool pressed = value >= TRIGGER_PRESSED_MIN;
+	switch (command.mode) {
+		case 1: // feedback: resistance from position data[0], strength data[1]
+			return pressed && command.data[1] != 0 && pos >= command.data[0]
+			           ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
+			           : TRIGGER_STATE_FEEDBACK_NO_FORCE;
+		case 2: // weapon: resistance from data[0], released at data[1]
+			if (pos >= command.data[1]) {
+				return TRIGGER_STATE_WEAPON_FULLY_PRESSED;
+			}
+			return pos >= command.data[0] ? TRIGGER_STATE_WEAPON_ALMOST_PRESSED
+			                              : TRIGGER_STATE_WEAPON_NOT_PRESSED;
+		case 3: // vibration from position data[0], amplitude data[1], frequency data[2]
+			return pressed && command.data[1] != 0 && command.data[2] != 0 &&
+			               pos >= command.data[0]
+			           ? TRIGGER_STATE_VIBRATION_IS_FIRING
+			           : TRIGGER_STATE_VIBRATION_NOT_FIRING;
+		case 4: // multiple-position feedback: strength per position
+			return pressed && command.data[pos] != 0 ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
+			                                         : TRIGGER_STATE_FEEDBACK_NO_FORCE;
+		case 5: // slope feedback from position data[0]
+			return pressed && pos >= command.data[0] ? TRIGGER_STATE_FEEDBACK_IS_PUSHING
+			                                         : TRIGGER_STATE_FEEDBACK_NO_FORCE;
+		case 6: // multiple-position vibration: frequency data[0], amplitude per position
+			return pressed && command.data[0] != 0 && command.data[1 + pos] != 0
+			           ? TRIGGER_STATE_VIBRATION_IS_FIRING
+			           : TRIGGER_STATE_VIBRATION_NOT_FIRING;
+		default: return 0;
+	}
+}
+
+void GetTriggerEffectState(int32_t* state) {
+	if (g_controller == nullptr) {
+		state[0] = 0;
+		state[1] = 0;
+		return;
+	}
+	g_controller->GetTriggerEffectState(state);
+}
+
 void Initialize() {
 	EXIT_IF(g_controller != nullptr);
 
@@ -348,6 +415,7 @@ void GameController::CheckActive() {
 	m_states_num    = 0;
 	m_first_state   = 0;
 	m_next_touch_id = 1;
+	m_state_effect  = {};
 }
 
 void GameController::AddState() {
@@ -592,6 +660,18 @@ bool GameController::SetTriggerEffect(const PadTriggerEffectParam& param) {
 		return false;
 	}
 
+	{
+		// The state the game reads back follows every effect it sets, even one the DualSense
+		// output below cannot reproduce.
+		Common::LockGuard lock(m_mutex);
+		for (int i = 0; i < 2; i++) {
+			if ((param.trigger_mask & (1u << i)) != 0) {
+				m_state_effect.trigger_mask |= static_cast<uint8_t>(1u << i);
+				m_state_effect.command[i] = param.command[i];
+			}
+		}
+	}
+
 	DualSenseEffects effect {};
 	if ((param.trigger_mask & 0x01u) != 0) {
 		effect.enable_bits |= 0x08;
@@ -615,6 +695,17 @@ bool GameController::SetTriggerEffect(const PadTriggerEffectParam& param) {
 		(void)SDL_SendGamepadEffect(pad, &effect, sizeof(effect));
 	}
 	return true;
+}
+
+void GameController::GetTriggerEffectState(int32_t* state) {
+	Common::LockGuard lock(m_mutex);
+	const Controller::Axis axes[2] = {Controller::Axis::TriggerLeft, Controller::Axis::TriggerRight};
+	for (int i = 0; i < 2; i++) {
+		state[i] = (m_state_effect.trigger_mask & (1u << i)) != 0
+		               ? TriggerEffectState(m_state_effect.command[i],
+		                                    TriggerTravel(m_state, axes[i]))
+		               : 0;
+	}
 }
 
 void GameController::GetConnectionInfo(bool* flag, int* count) {

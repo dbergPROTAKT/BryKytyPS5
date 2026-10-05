@@ -74,6 +74,8 @@ void SetTouchPad(int id, int finger, bool down, float x, float y);
 void SetSensor(int id, Sensor sensor, const float* data, uint64_t time_us);
 void ResetInputState();
 int  GetActiveControllerId();
+// scePadGetTriggerEffectState: per trigger, the state of the game's effect at the trigger's travel.
+void GetTriggerEffectState(int32_t* state);
 
 int KYTY_SYSV_ABI PadInit();
 int KYTY_SYSV_ABI PadOpen(int user_id, int type, int index, const void* param);
